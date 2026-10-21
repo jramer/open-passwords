@@ -125,13 +125,17 @@ function isVisible(el) {
   return true;
 }
 
-// hidden/manager-only fields are fine, block the clickjacking shapes (1px, opacity:0, offscreen)
+// Only visible fields may receive credentials, including through the toolbar.
 function isFillable(el) {
   if (!el.isConnected) return false;
   const s = getComputedStyle(el);
 
-  if (s.display === "none" || s.visibility === "hidden" || s.visibility === "collapse") return true;
-  if (el.offsetParent === null && s.position !== "fixed") return true;
+  if (s.display === "none" || s.visibility === "hidden" || s.visibility === "collapse") return false;
+  if (el.offsetParent === null && s.position !== "fixed") return false;
+  // Opacity does not inherit; a visible-looking input may have an invisible ancestor.
+  for (let parent = el; parent; parent = parent.parentElement || parent.getRootNode?.().host) {
+    if (parseFloat(getComputedStyle(parent).opacity) < 0.1) return false;
+  }
 
   const r = el.getBoundingClientRect();
   if (r.width < 4 || r.height < 4) return false;
