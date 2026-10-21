@@ -211,11 +211,11 @@ const lastFillByTab = new Map();
 // re-filling the same login skips a second Touch ID, apple prompts every read
 const PW_CACHE_TTL_MS = 120_000;
 const pwCache = new Map();
-function pwCacheKey(host, username) {
-  return `${host}\n${(username || "").toLowerCase()}`;
+function pwCacheKey(origin, username) {
+  return `${origin}\n${(username || "").toLowerCase()}`;
 }
-function pwCacheGet(host, username) {
-  const k = pwCacheKey(host, username);
+function pwCacheGet(origin, username) {
+  const k = pwCacheKey(origin, username);
   const hit = pwCache.get(k);
   if (!hit) return null;
   if (Date.now() - hit.at > PW_CACHE_TTL_MS) {
@@ -224,9 +224,9 @@ function pwCacheGet(host, username) {
   }
   return hit.cred;
 }
-function pwCacheSet(host, cred) {
-  if (!host || !cred?.username) return;
-  pwCache.set(pwCacheKey(host, cred.username), { cred, at: Date.now() });
+function pwCacheSet(origin, cred) {
+  if (!origin || !cred?.username) return;
+  pwCache.set(pwCacheKey(origin, cred.username), { cred, at: Date.now() });
 }
 function pwCacheClear() {
   pwCache.clear();
