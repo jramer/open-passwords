@@ -244,11 +244,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       onShortcut();
       return false;
     }
-    case "unlocked": {
-      // auto-pair opened the vault while the inline PIN box was up
-      if (suggestionEl && typeof lockedResume === "function") lockedResume();
-      return false;
-    }
     case "findTotpUri": {
       if (window !== window.top) return false;
       sendResponse({ uris: findTotpUris() });
@@ -260,7 +255,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 let fillAnchor = null;
 let otpAnchor = null;
-let lockedResume = null;
 // suppresses a save offer for a login just filled from the vault
 let lastAutofill = null;
 // its submit always offers to save (reset page / password change)
@@ -268,7 +262,6 @@ let lastGenerated = null;
 
 let suggestionEl = null;
 let anchorField = null;
-let cachedLogins = null;
 let navItems = [];
 let navIndex = -1;
 
@@ -308,7 +301,6 @@ function removeSuggestion() {
   anchorField = null;
   navItems = [];
   navIndex = -1;
-  lockedResume = null;
 }
 
 function setActiveNav(i) {
@@ -472,127 +464,19 @@ function buildSuggestionBox(field) {
   return box;
 }
 
-async function buildLockedSuggestion(field, onUnlock) {
+async function buildLockedSuggestion(field) {
+  removeSuggestion();
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "openUnlock" });
+    if (result?.ok) return;
+  } catch (_) {}
+  if (!field.isConnected || field !== deepActiveElement()) return;
   const box = buildSuggestionBox(field);
-
-  const msg = document.createElement("div");
-  msg.textContent = "Enter the code shown on your Mac";
-  Object.assign(msg.style, { padding: "8px 10px 4px", fontSize: "12px", opacity: "0.7" });
-  box.appendChild(msg);
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.inputMode = "numeric";
-  input.maxLength = 6;
-  input.placeholder = "------";
-  Object.assign(input.style, {
-    margin: "4px 12px 8px",
-    width: "calc(100% - 24px)",
-    padding: "9px",
-    font: `16px ${UI_FONT}`,
-    letterSpacing: "5px",
-    textAlign: "center",
-    border: "1px solid rgba(128,128,128,0.35)",
-    borderRadius: "10px",
-    background: "Canvas",
-    color: "CanvasText",
-    boxSizing: "border-box",
-  });
-  input.style.setProperty("background", "light-dark(rgba(255,255,255,0.55), rgba(0,0,0,0.28))");
-  box.appendChild(input);
-
-  const status = document.createElement("div");
-  Object.assign(status.style, { padding: "0 10px 8px", fontSize: "12px", color: "#ff453a", minHeight: "14px" });
-  box.appendChild(status);
-
-  input.addEventListener("mousedown", (e) => e.stopPropagation());
-
-  const setStatus = (text, isError) => {
-    status.style.color = isError ? "#ff453a" : "rgba(128,128,128,0.9)";
-    status.textContent = text;
-  };
-
-  const again = document.createElement("div");
-  again.textContent = "Get a new code";
-  Object.assign(again.style, {
-    padding: "0 12px 10px",
-    fontSize: "12px",
-    opacity: "0.7",
-    cursor: "pointer",
-    textDecoration: "underline",
-  });
-  again.addEventListener("mousedown", (e) => e.stopPropagation());
-  again.addEventListener("click", async () => {
-    setStatus("Asking your Mac for a new code...", false);
-    input.value = "";
-    await chrome.runtime.sendMessage({ type: "requestChallenge" }).catch(() => {});
-    setStatus("Enter the new code on your Mac", false);
-    input.focus();
-  });
-  box.appendChild(again);
-
-  // a second prompt would invalidate the code the user is reading
-  chrome.runtime.sendMessage({ type: "requestChallenge", ifNeeded: true }).catch(() => {});
-
-  // also reached from the background's "unlocked" message via lockedResume
-  const finishUnlock = async () => {
-    lockedResume = null;
-    if (typeof onUnlock === "function") {
-      removeSuggestion();
-      onUnlock();
-      return;
-    }
-    cachedLogins = null;
-    const r2 = await chrome.runtime.sendMessage({ type: "inlineLogins" }).catch(() => null);
-    cachedLogins = r2?.logins || [];
-    if (cachedLogins.length === 1) {
-      removeSuggestion();
-      fillAnchor = field;
-      chrome.runtime.sendMessage({ type: "inlineFill", loginName: cachedLogins[0] }).catch(() => {});
-    } else if (cachedLogins.length > 1) {
-      buildChooser(field, cachedLogins);
-    } else {
-      removeSuggestion();
-    }
-  };
-  lockedResume = finishUnlock;
-
-  let verifying = false;
-  const doVerify = async () => {
-    if (verifying) return;
-    const pin = input.value.trim();
-    if (pin.length < 4) return;
-    verifying = true;
-    setStatus("Verifying...", false);
-    let res;
-    try {
-      res = await chrome.runtime.sendMessage({ type: "verifyPin", pin });
-    } catch (err) {
-      verifying = false;
-      setStatus("Verification failed, try again", true);
-      return;
-    }
-    verifying = false;
-    if (res?.ok && res.state === "unlocked") {
-      finishUnlock();
-    } else {
-      // the attempt burned that challenge, so the background already put a new code on the Mac
-      const base = res?.error || "Verification failed";
-      setStatus(res?.newCode ? `${base} - enter the new code on your Mac` : base, true);
-      input.value = "";
-      input.focus();
-    }
-  };
-
-  input.addEventListener("keydown", (e) => {
-    if (!e.isTrusted) return;
-    if (e.key === "Enter") doVerify();
-  });
-  input.addEventListener("input", () => {
-    if (input.value.trim().length === 6) doVerify();
-  });
-
-  setTimeout(() => input.focus(), 0);
+  const message = document.createElement("div");
+  message.textContent = "Click Open Passwords in your browser toolbar to enter the pairing code.";
+  Object.assign(message.style, { padding: "8px 12px", maxWidth: "280px" });
+  box.appendChild(message);
+  positionBox();
 }
 
 function isNewPasswordField(el) {
@@ -924,7 +808,7 @@ async function buildOneTimeCodeSuggestion(field) {
     const row = document.createElement("div");
     row.textContent = "Unlock to fill verification codes…";
     Object.assign(row.style, { padding: "8px 10px", cursor: "pointer" });
-    registerRow(row, () => buildLockedSuggestion(field, () => buildOneTimeCodeSuggestion(field)));
+    registerRow(row, () => buildLockedSuggestion(field));
     box.appendChild(row);
     positionBox();
     return;
@@ -963,15 +847,6 @@ function onShortcut() {
   if (window !== window.top) return;
   const target = Array.from(document.querySelectorAll("input")).find((i) => isVisible(i) && isLoginField(i));
   if (target) target.focus();
-}
-
-function buildChooser(field, logins) {
-  if (!logins.length) {
-    removeSuggestion();
-    return;
-  }
-  const box = buildSuggestionBox(field);
-  appendLoginRows(box, field, logins);
 }
 
 // excludes generic app hosting (firebaseapp, vercel) where anyone can deploy

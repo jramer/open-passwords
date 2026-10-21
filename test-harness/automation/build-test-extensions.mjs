@@ -69,6 +69,19 @@ function patchBackground(src, kind) {
     );
   } else if (kind === "pinflow") {
     src = src.replace(
+      /case "getState":[\s\S]*?break;/,
+      `case "getState":
+          sendResponse({ ok: true, state: globalThis.__unlocked ? "unlocked" : "needs_pin", caps: {} });
+          break;`,
+    );
+    src = src.replace(
+      /case "getLogins": \{[\s\S]*?\n        \}/,
+      `case "getLogins": {
+          sendResponse({ ok: true, logins: [{ username: "test@example.com", sites: [] }] });
+          break;
+        }`,
+    );
+    src = src.replace(
       /case "inlineLogins": \{[\s\S]*?\n        \}/,
       `case "inlineLogins": {
           if (!globalThis.__unlocked) return sendResponse({ ok: true, locked: true, logins: [] });

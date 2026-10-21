@@ -77,6 +77,11 @@ git clone https://github.com/ManiForoughi2/open-passwords.git
 5. click the toolbar icon, type the 6-digit code your Mac shows, done
 6. go to a site with a saved login and fill it
 
+Pairing codes are entered only in the extension's toolbar popup. The inline
+**Unlock to autofill…** action opens that popup; if your browser cannot open it
+automatically, click the toolbar icon. After unlocking, select a login or code
+to fill it. Never enter the pairing code in a webpage.
+
 ### Optional: hide the browser's own password manager
 
 The popup can suppress the browser's competing save bubble and autofill dropdown on its own (toggles in the footer). Removing the browser's whole password manager, the omnibox key icon and built-in autofill included, takes a macOS managed policy, and an extension can't write one by itself. So there's a one-time helper:
