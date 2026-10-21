@@ -19,6 +19,7 @@ function background() {
   const chrome = {
     runtime: { id: "test", onMessage: { addListener(fn) { listener = fn; } }, onStartup: event, onInstalled: event, sendMessage: async () => {} },
     action: { async openPopup() { opened++; } },
+    tabs: {},
     alarms: { create() {}, onAlarm: event }, commands: { onCommand: event },
   };
   vm.runInNewContext(source.replace(/^import .*;\s*/m, ""), { chrome, ApplePasswords, State, URL, console, setTimeout });

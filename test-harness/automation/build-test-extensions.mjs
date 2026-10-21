@@ -68,6 +68,11 @@ function patchBackground(src, kind) {
         }`,
     );
   } else if (kind === "pinflow") {
+    // Playwright opens the protected popup document as a tab to inspect its UI.
+    src = src.replace(
+      "return sender.id === chrome.runtime.id && sender.tab === undefined;",
+      'return sender.id === chrome.runtime.id && (sender.tab === undefined || sender.url === chrome.runtime.getURL("src/popup.html"));',
+    );
     src = src.replace(
       /case "getState":[\s\S]*?break;/,
       `case "getState":
