@@ -69,7 +69,7 @@ await withExt(LOCKED, "locked", async (ctx) => {
   await box(page).locator("text=Unlock to autofill").click().catch(() => {});
   await page.waitForTimeout(500);
   const t2 = await txt(page);
-  check("locked: PIN field after click", /Enter the code/i.test(t2), `got "${t2}"`);
+  check("locked: pairing input is never exposed to the webpage", (await box(page).locator("input").count()) === 0, `got "${t2}"`);
   await page.screenshot({ path: join(SHOTS, "v4-locked-pin.png") });
   await page.close();
 });

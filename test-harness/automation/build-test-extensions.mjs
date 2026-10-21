@@ -68,6 +68,24 @@ function patchBackground(src, kind) {
         }`,
     );
   } else if (kind === "pinflow") {
+    // Playwright opens the protected popup document as a tab to inspect its UI.
+    src = src.replace(
+      "return sender.id === chrome.runtime.id && sender.tab === undefined;",
+      'return sender.id === chrome.runtime.id && (sender.tab === undefined || sender.url === chrome.runtime.getURL("src/popup.html"));',
+    );
+    src = src.replace(
+      /case "getState":[\s\S]*?break;/,
+      `case "getState":
+          sendResponse({ ok: true, state: globalThis.__unlocked ? "unlocked" : "needs_pin", caps: {} });
+          break;`,
+    );
+    src = src.replace(
+      /case "getLogins": \{[\s\S]*?\n        \}/,
+      `case "getLogins": {
+          sendResponse({ ok: true, logins: [{ username: "test@example.com", sites: [] }] });
+          break;
+        }`,
+    );
     src = src.replace(
       /case "inlineLogins": \{[\s\S]*?\n        \}/,
       `case "inlineLogins": {

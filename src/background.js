@@ -52,11 +52,6 @@ async function tryAutoPair(reason) {
     autoPairError = null;
     if (client.ready) {
       flushPendingSaves();
-      // only the active tab can have the inline PIN box open
-      try {
-        const tab = await activeTab();
-        if (tab?.id != null) chrome.tabs.sendMessage(tab.id, { type: "unlocked" }).catch(() => {});
-      } catch (_) {}
     }
     return client.ready;
   } catch (e) {
@@ -310,8 +305,7 @@ const CONTENT_ALLOWED = new Set([
   "inlineFill",
   "inlineOneTimeCodes",
   "inlineFillOneTimeCode",
-  "requestChallenge",
-  "verifyPin",
+  "openUnlock",
   "resolveSave",
 ]);
 
@@ -560,9 +554,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true, state: client.state });
           break;
 
+        case "openUnlock":
+          // Called directly from a trusted inline click; pairing stays on the extension origin.
+          await chrome.action.openPopup();
+          sendResponse({ ok: true });
+          break;
+
         case "requestChallenge":
-          // top frame or popup only, so a hostile sub-frame cant spam native prompts
-          if (fromContent && sender.frameId !== 0) return sendResponse({ ok: false, error: "forbidden" });
           await ensureConnected();
           await withTimeout(client.requestChallenge({ ifNeeded: !!msg.ifNeeded }), 8000, "challenge timed out");
           // not awaited, the UI shows its PIN box while auto-pair reads the code
@@ -571,7 +569,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
 
         case "verifyPin": {
-          if (fromContent && sender.frameId !== 0) return sendResponse({ ok: false, error: "forbidden" });
           await ensureConnected();
           try {
             await withTimeout(client.verifyPin(msg.pin), 8000, "verification timed out");
