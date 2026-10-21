@@ -204,11 +204,11 @@ const lastFillByTab = new Map();
 // re-filling the same login skips a second Touch ID, apple prompts every read
 const PW_CACHE_TTL_MS = 120_000;
 const pwCache = new Map();
-function pwCacheKey(host, username) {
-  return `${host}\n${(username || "").toLowerCase()}`;
+function pwCacheKey(origin, username) {
+  return `${origin}\n${(username || "").toLowerCase()}`;
 }
-function pwCacheGet(host, username) {
-  const k = pwCacheKey(host, username);
+function pwCacheGet(origin, username) {
+  const k = pwCacheKey(origin, username);
   const hit = pwCache.get(k);
   if (!hit) return null;
   if (Date.now() - hit.at > PW_CACHE_TTL_MS) {
@@ -217,9 +217,9 @@ function pwCacheGet(host, username) {
   }
   return hit.cred;
 }
-function pwCacheSet(host, cred) {
-  if (!host || !cred?.username) return;
-  pwCache.set(pwCacheKey(host, cred.username), { cred, at: Date.now() });
+function pwCacheSet(origin, cred) {
+  if (!origin || !cred?.username) return;
+  pwCache.set(pwCacheKey(origin, cred.username), { cred, at: Date.now() });
 }
 function pwCacheClear() {
   pwCache.clear();
@@ -405,10 +405,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
           // pass only the username through, sites is caller-supplied
           const safeLogin = { username: msg.loginName?.username };
-          let cred = pwCacheGet(host, safeLogin.username);
+          const origin = new URL(frameUrl).origin;
+          let cred = pwCacheGet(origin, safeLogin.username);
           if (!cred) {
             cred = await client.getPasswordForLoginName(sender.tab.id, frameUrl, safeLogin);
-            if (cred) pwCacheSet(host, cred);
+            if (cred) pwCacheSet(origin, cred);
           }
           let filled = false;
           if (cred) {
@@ -418,14 +419,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 type: "fill",
                 username: cred.username,
                 password: cred.password,
-                expectedHost: host,
+                expectedOrigin: origin,
               },
               { frameId },
             );
             filled = !!resp?.filled;
             if (filled) {
               recordMru(host, cred.username);
-              lastFillByTab.set(sender.tab.id, { host, username: cred.username });
+              lastFillByTab.set(sender.tab.id, { origin, username: cred.username });
             }
           }
           sendResponse({ ok: true, filled });
@@ -617,24 +618,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (!/^https:\/\//i.test(tab.url) && !isLocalDev) {
             return sendResponse({ ok: false, error: "refusing to fill on a non-HTTPS page" });
           }
-          let cred = pwCacheGet(host, msg.loginName?.username);
+          const origin = new URL(tab.url).origin;
+          let cred = pwCacheGet(origin, msg.loginName?.username);
           if (!cred) {
             cred = await client.getPasswordForLoginName(tab.id, tab.url, msg.loginName);
-            if (cred) pwCacheSet(host, cred);
+            if (cred) pwCacheSet(origin, cred);
           }
           let filled = false;
           if (cred) {
-            // content script re-checks expectedHost before filling
+            // Re-check the complete origin after any native authentication delay.
             const resp = await chrome.tabs.sendMessage(tab.id, {
               type: "fill",
               username: cred.username,
               password: cred.password,
-              expectedHost: host,
+              expectedOrigin: origin,
             });
             filled = !!resp?.filled;
             if (filled) {
               recordMru(host, cred.username);
-              lastFillByTab.set(tab.id, { host, username: cred.username });
+              lastFillByTab.set(tab.id, { origin, username: cred.username });
             }
           }
           sendResponse({ ok: true, filled });
@@ -647,18 +649,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const tab = await activeTab();
           const entry = tab?.id != null ? lastFillByTab.get(tab.id) : null;
           const host = tab?.url ? registrableHost(tab.url) : null;
-          if (!entry || !host || entry.host !== host) {
+          const origin = tab?.url ? new URL(tab.url).origin : null;
+          if (!entry || !host || entry.origin !== origin) {
             return sendResponse({ ok: true, refilled: false });
+          }
+          if (!/^https:\/\//i.test(tab.url) && !isLocalDevHost(host)) {
+            return sendResponse({ ok: false, error: "refusing to fill on a non-HTTPS page" });
           }
           try {
             const cred = await client.getPasswordForLoginName(tab.id, tab.url, { username: entry.username });
             if (!cred) return sendResponse({ ok: true, refilled: false });
-            pwCacheSet(host, cred);
+            pwCacheSet(origin, cred);
             const resp = await chrome.tabs.sendMessage(tab.id, {
               type: "fill",
               username: cred.username,
               password: cred.password,
-              expectedHost: host,
+              expectedOrigin: origin,
             });
             sendResponse({ ok: true, refilled: !!resp?.filled, username: cred.username });
           } catch (e) {

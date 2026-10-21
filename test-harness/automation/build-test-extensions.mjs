@@ -10,8 +10,8 @@ const OUT = join(HERE, ".builds");
 
 const MOCK_INLINEFILL = `case "inlineFill": {
           const tab = sender.tab;
-          const host = tab?.url ? new URL(tab.url).hostname.toLowerCase() : "";
-          const resp = await chrome.tabs.sendMessage(tab.id, { type: "fill", username: "test@example.com", password: "TestPass123", expectedHost: host });
+          const origin = sender.url ? new URL(sender.url).origin : "";
+          const resp = await chrome.tabs.sendMessage(tab.id, { type: "fill", username: "test@example.com", password: "TestPass123", expectedOrigin: origin }, { frameId: sender.frameId });
           sendResponse({ ok: true, filled: !!resp?.filled });
           break;
         }`;

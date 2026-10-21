@@ -202,12 +202,12 @@ function domDistance(a, b) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== "fill") return false;
-  // host must match the origin the background pinned the cred to, so site A's cred never lands on site B
+  // Navigation during native authentication must not change the receiving origin.
   if (sender.id !== chrome.runtime.id) {
     sendResponse({ ok: false, filled: false, error: "forbidden" });
     return true;
   }
-  if (msg.expectedHost && location.hostname.toLowerCase() !== msg.expectedHost) {
+  if (!msg.expectedOrigin || location.origin !== msg.expectedOrigin) {
     sendResponse({ ok: false, filled: false, error: "origin mismatch" });
     return true;
   }

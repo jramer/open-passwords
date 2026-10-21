@@ -12,19 +12,21 @@ const ctx = await chromium.launchPersistentContext("/tmp/op-xo-" + Date.now(), {
 ctx.serviceWorkers()[0] || (await ctx.waitForEvent("serviceworker", { timeout: 10000 }).catch(() => null));
 const page = await ctx.newPage();
 await page.goto(`${BASE}/login-standard.html`, { waitUntil: "domcontentloaded" });
-await page.evaluate(() => {
+const foreignUrl = new URL("/iframe-pages/iframe-login.html", BASE);
+foreignUrl.hostname = foreignUrl.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
+await page.evaluate((url) => {
   const f = document.createElement("iframe");
   f.id = "xf";
   f.style = "width:600px;height:300px";
-  f.src = "http://openpw.test:8799/iframe-pages/iframe-login.html";
+  f.src = url;
   document.body.appendChild(f);
-});
+}, foreignUrl.href);
 await page.waitForTimeout(1200);
-const xframe = page.frames().find((f) => f.url().includes("openpw.test") && f.url().includes("iframe-login"));
+const xframe = page.frames().find((f) => f.url() === foreignUrl.href);
 if (!xframe) {
-  console.log("PASS (cross-origin frame did not load; no offer possible)");
+  console.log("FAIL cross-origin fixture did not load");
   await ctx.close();
-  process.exit(0);
+  process.exit(1);
 }
 await xframe
   .locator('input[name="username"], input[autocomplete="username"], input[type="text"]')
