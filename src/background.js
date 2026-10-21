@@ -77,9 +77,13 @@ client.onOneTimeCodeAvailable(async () => {
   } catch (_) {}
 });
 
-// rows resolve by id so the page never chooses the username/domain
+// Each frame owns a separate list; opaque row IDs reject stale selections.
 const otpByTab = new Map();
 const OTP_LIST_TTL_MS = 120_000;
+chrome.tabs.onRemoved?.addListener((tabId) => otpByTab.delete(tabId));
+chrome.tabs.onUpdated?.addListener((tabId, change) => {
+  if (change.url) otpByTab.delete(tabId);
+});
 
 // apple walks the whole parent chain via webNavigation, the top URL covers a same-site iframe without another permission
 function frameUrlsFor(sender) {
@@ -91,27 +95,35 @@ function frameUrlsFor(sender) {
 }
 
 // never the code itself at list time
-function otpRow(e, i) {
-  return { id: i, source: e.source, username: e.username, domain: e.domain };
+function otpRow(e, id) {
+  return { id, source: e.source, username: e.username, domain: e.domain };
 }
 
-async function listOneTimeCodes(tabId, frameId, frameUrls) {
+function otpOrigins(frameUrls) {
+  return JSON.stringify(frameUrls.map((url) => new URL(url).origin));
+}
+
+async function listOneTimeCodes(tabId, frameId, frameUrls, documentId) {
   const { entries, requiresAuth } = await client.getOneTimeCodes(tabId, frameId, frameUrls);
-  otpByTab.set(tabId, { at: Date.now(), entries, frameId, frameUrls });
-  return { rows: entries.map(otpRow), requiresAuth };
+  const rows = entries.map((entry) => ({ id: crypto.randomUUID(), entry }));
+  let frames = otpByTab.get(tabId);
+  if (!frames) otpByTab.set(tabId, (frames = new Map()));
+  frames.set(frameId, { at: Date.now(), rows, frameUrls, documentId, origins: otpOrigins(frameUrls) });
+  return { rows: rows.map(({ entry, id }) => otpRow(entry, id)), requiresAuth };
 }
 
 // TOTP is re-read now, the value rotates and this read triggers Touch ID when the vault demands it
-async function resolveOneTimeCode(tabId, id) {
-  const cached = otpByTab.get(tabId);
+async function resolveOneTimeCode(tabId, frameId, frameUrls, id, documentId) {
+  const cached = otpByTab.get(tabId)?.get(frameId);
   if (!cached || Date.now() - cached.at > OTP_LIST_TTL_MS) throw new Error("code list expired, focus the field again");
-  const entry = cached.entries[id];
+  if (cached.origins !== otpOrigins(frameUrls) || cached.documentId !== documentId) {
+    throw new Error("code page changed, focus the field again");
+  }
+  const entry = cached.rows.find((row) => row.id === id)?.entry;
   if (!entry) throw new Error("unknown code");
   if (entry.source !== "totp") return entry.code;
-  const fresh = await client.readOneTimeCode(tabId, cached.frameId, cached.frameUrls, entry.username);
-  const match =
-    fresh.find((e) => e.source === "totp" && e.username === entry.username && e.domain === entry.domain) ||
-    fresh.find((e) => e.source === "totp");
+  const fresh = await client.readOneTimeCode(tabId, frameId, cached.frameUrls, entry.username);
+  const match = fresh.find((e) => e.source === "totp" && e.username === entry.username && e.domain === entry.domain);
   if (!match?.code) throw new Error("no code returned");
   return match.code;
 }
@@ -360,7 +372,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (!client.ready) return sendResponse({ ok: true, locked: true, supported: client.canFillOneTimeCodes, rows: [] });
           if (!client.canFillOneTimeCodes) return sendResponse({ ok: true, locked: false, supported: false, rows: [] });
           try {
-            const { rows, requiresAuth } = await listOneTimeCodes(sender.tab.id, sender.frameId ?? 0, frameUrlsFor(sender));
+            const { rows, requiresAuth } = await listOneTimeCodes(sender.tab.id, sender.frameId ?? 0, frameUrlsFor(sender), sender.documentId);
             sendResponse({ ok: true, locked: false, supported: true, rows, requiresAuth });
           } catch (e) {
             sendResponse({ ok: true, locked: false, supported: true, rows: [], error: String(e?.message ?? e) });
@@ -376,11 +388,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (!/^https:\/\//i.test(frameUrl) && !isLocalDevHost(host)) {
             return sendResponse({ ok: false, error: "refusing to fill on a non-HTTPS frame" });
           }
-          const code = await resolveOneTimeCode(sender.tab.id, Number(msg.id));
+          const code = await resolveOneTimeCode(sender.tab.id, frameId, frameUrlsFor(sender), msg.id, sender.documentId);
           const resp = await chrome.tabs.sendMessage(
             sender.tab.id,
-            { type: "fillOtp", code, expectedHost: host },
-            { frameId },
+            { type: "fillOtp", code, expectedOrigin: new URL(frameUrl).origin },
+            sender.documentId ? { frameId, documentId: sender.documentId } : { frameId },
           );
           sendResponse({ ok: true, filled: !!resp?.filled });
           break;
@@ -518,18 +530,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         case "fillOneTimeCode": {
-          // every frame gets it, only the one with a code field acts. value returned so the popup can show it if none did
+          // The popup lists codes for the top frame; do not broadcast them to other frames.
           const tab = await activeTab();
           if (!tab?.url) return sendResponse({ ok: false, error: "no active tab" });
           const host = registrableHost(tab.url);
           if (!/^https:\/\//i.test(tab.url) && !isLocalDevHost(host)) {
             return sendResponse({ ok: false, error: "refusing to fill on a non-HTTPS page" });
           }
-          const code = await resolveOneTimeCode(tab.id, Number(msg.id));
+          const code = await resolveOneTimeCode(tab.id, 0, frameUrlsFor({ url: tab.url, tab }), msg.id);
           let filled = false;
           try {
             const frames = await new Promise((resolve) =>
-              chrome.tabs.sendMessage(tab.id, { type: "fillOtp", code, expectedHost: host }, (r) => {
+              chrome.tabs.sendMessage(tab.id, { type: "fillOtp", code, expectedOrigin: new URL(tab.url).origin }, { frameId: 0 }, (r) => {
                 void chrome.runtime.lastError;
                 resolve(r);
               }),

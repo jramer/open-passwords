@@ -222,7 +222,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   switch (msg?.type) {
     case "fillOtp": {
-      if (msg.expectedHost && location.hostname.toLowerCase() !== msg.expectedHost) {
+      if (!msg.expectedOrigin || location.origin !== msg.expectedOrigin) {
         sendResponse({ ok: false, filled: false, error: "origin mismatch" });
         return true;
       }
