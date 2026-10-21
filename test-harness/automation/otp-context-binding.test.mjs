@@ -106,3 +106,23 @@ test("navigation and tab closure invalidate cached lists", async () => {
     assert.equal((await fill(bg, row.id, a)).ok, false);
   }
 });
+
+test("the OTP recipient rejects HTTP downgrades, other ports, and missing origins", async () => {
+  const content = await readFile(new URL("../../src/content.js", import.meta.url), "utf8");
+  const marker = "chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {";
+  const start = content.indexOf(marker, content.indexOf(marker) + marker.length);
+  const end = content.indexOf("\nlet fillAnchor", start);
+  for (const origin of ["https://account.example", "http://account.example", "https://account.example:8443"]) {
+    let listener, filled = false;
+    vm.runInNewContext(content.slice(start, end), {
+      chrome: { runtime: { id: "test", onMessage: { addListener(fn) { listener = fn; } } } },
+      location: { origin, hostname: "account.example" },
+      otpTargetField: () => ({}), fillOtp: () => { filled = true; },
+    });
+    listener({ type: "fillOtp", code: "123456", expectedOrigin: "https://account.example" }, { id: "test" }, () => {});
+    assert.equal(filled, origin === "https://account.example");
+    filled = false;
+    listener({ type: "fillOtp", code: "123456" }, { id: "test" }, () => {});
+    assert.equal(filled, false);
+  }
+});
