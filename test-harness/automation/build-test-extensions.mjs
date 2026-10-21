@@ -61,8 +61,8 @@ function patchBackground(src, kind) {
     src = src.replace(
       /case "inlineFillOneTimeCode": \{[\s\S]*?\n        \}/,
       `case "inlineFillOneTimeCode": {
-          const host = sender.url ? new URL(sender.url).hostname.toLowerCase() : "";
-          const resp = await chrome.tabs.sendMessage(sender.tab.id, { type: "fillOtp", code: "246810", expectedHost: host }, { frameId: sender.frameId });
+          const origin = sender.url ? new URL(sender.url).origin : "";
+          const resp = await chrome.tabs.sendMessage(sender.tab.id, { type: "fillOtp", code: "246810", expectedOrigin: origin }, { frameId: sender.frameId });
           sendResponse({ ok: true, filled: !!resp?.filled });
           break;
         }`,
